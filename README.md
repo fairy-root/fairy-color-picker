@@ -20,9 +20,15 @@ A sleek and modern color picker application built with CustomTkinter, featuring 
     - HEX codes (e.g., #FF0000)
     - RGB format (e.g., rgb(255,0,0))
     - Comma-separated values (e.g., 255,0,0)
-  - Screen color picker tool (eyedropper)
+  - Advanced screen color picker tool:
+    - Real-time color preview while picking
+    - Precise pixel-level color detection
+    - Convenient instruction overlay
 - Real-time color preview
-- Five automatically generated shades for each color
+- Five automatically generated shades for each color:
+  - Advanced HSV-based color shading algorithm
+  - Intelligent brightness and saturation adjustments
+  - Maintains color harmony across generated shades
 - Copy functionality for:
   - HEX color codes
   - RGB values
