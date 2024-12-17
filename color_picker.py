@@ -7,7 +7,7 @@ import keyboard
 import random
 import re
 import pystray
-from PIL import Image
+from PIL import Image, ImageGrab
 import threading
 import time
 import win32gui
@@ -15,6 +15,8 @@ import win32con
 import sys
 import tempfile
 import atexit
+import colorsys
+import numpy as np
 
 def show_already_running_message():
     root = ctk.CTk()
@@ -189,7 +191,7 @@ class ColorPicker(ctk.CTk):
             
             # Create a small toplevel window for instructions
             instruction = ctk.CTkToplevel()
-            instruction.geometry("300x100")
+            instruction.geometry("300x150")
             instruction.title("Fairy Color Picker")
             instruction.attributes('-topmost', True)
             
@@ -197,20 +199,42 @@ class ColorPicker(ctk.CTk):
             screen_width = instruction.winfo_screenwidth()
             screen_height = instruction.winfo_screenheight()
             x = (screen_width - 300) // 2
-            y = (screen_height - 100) // 2
-            instruction.geometry(f"300x100+{x}+{y}")
+            y = (screen_height - 150) // 2
+            instruction.geometry(f"300x150+{x}+{y}")
             
             label = ctk.CTkLabel(instruction, 
-                text="Move mouse to desired color and press Space.\nPress Esc to cancel.")
+                text="Move mouse to desired color and press Space.\nHold Shift for averaged sampling.\nPress Esc to cancel.")
             label.pack(pady=20)
             
             def check_keys():
                 if keyboard.is_pressed('space'):
                     x, y = pyautogui.position()
-                    color = pyautogui.pixel(x, y)
-                    self.red_var.set(color[0])
-                    self.green_var.set(color[1])
-                    self.blue_var.set(color[2])
+                    
+                    # If shift is held, do averaged sampling
+                    if keyboard.is_pressed('shift'):
+                        # Capture a 3x3 region around the cursor
+                        region = (x-1, y-1, x+2, y+2)
+                        screenshot = ImageGrab.grab(bbox=region)
+                        pixels = np.array(screenshot)
+                        # Calculate average color
+                        avg_color = pixels.mean(axis=(0,1)).astype(int)
+                        color = tuple(avg_color)
+                    else:
+                        color = pyautogui.pixel(x, y)
+                    
+                    # Convert to HSV for better color processing
+                    hsv = colorsys.rgb_to_hsv(color[0]/255, color[1]/255, color[2]/255)
+                    
+                    # Apply slight saturation boost for more vivid colors
+                    enhanced_hsv = (hsv[0], min(1.0, hsv[1] * 1.1), hsv[2])
+                    
+                    # Convert back to RGB
+                    enhanced_rgb = colorsys.hsv_to_rgb(*enhanced_hsv)
+                    enhanced_color = tuple(int(x * 255) for x in enhanced_rgb)
+                    
+                    self.red_var.set(enhanced_color[0])
+                    self.green_var.set(enhanced_color[1])
+                    self.blue_var.set(enhanced_color[2])
                     self.update_color()
                     instruction.destroy()
                     # Always show window after picking color
@@ -226,7 +250,7 @@ class ColorPicker(ctk.CTk):
                     instruction.after(100, check_keys)
             
             check_keys()
-            
+        
         except Exception as e:
             error_window = ctk.CTkToplevel()
             error_window.geometry("300x100")
@@ -448,13 +472,30 @@ class ColorPicker(ctk.CTk):
         self.icon.icon = self.icon_image
     
     def update_shades(self, r, g, b):
-        # Generate shades (darker to lighter)
+        # Convert RGB to HSV for better shade generation
+        hsv = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+        
+        # Generate shades with better distribution
         shades = []
-        for i in range(5):
-            factor = 0.5 + (i * 0.25)  # 0.5, 0.75, 1.0, 1.25, 1.5
-            new_r = min(255, int(r * factor))
-            new_g = min(255, int(g * factor))
-            new_b = min(255, int(b * factor))
+        
+        # Generate 5 shades: 2 darker, original, 2 lighter
+        factors = [0.5, 0.75, 1.0, 1.25, 1.5]  # Value multipliers
+        sat_factors = [1.1, 1.05, 1.0, 0.95, 0.9]  # Saturation adjustments
+        
+        for i, (v_factor, s_factor) in enumerate(zip(factors, sat_factors)):
+            # Adjust value and saturation while keeping hue constant
+            new_hsv = (
+                hsv[0],  # Keep hue
+                min(1.0, hsv[1] * s_factor),  # Adjust saturation
+                min(1.0, hsv[2] * v_factor)   # Adjust value
+            )
+            
+            # Convert back to RGB
+            rgb = colorsys.hsv_to_rgb(*new_hsv)
+            new_r = int(rgb[0] * 255)
+            new_g = int(rgb[1] * 255)
+            new_b = int(rgb[2] * 255)
+            
             hex_color = f"#{new_r:02x}{new_g:02x}{new_b:02x}"
             shades.append((hex_color, (new_r, new_g, new_b)))
         
@@ -463,7 +504,7 @@ class ColorPicker(ctk.CTk):
             self.shade_buttons[i].configure(fg_color=hex_color)
             self.shade_buttons[i].hex_color = hex_color
             self.shade_buttons[i].rgb_values = _
-    
+            
     def copy_shade(self, index):
         hex_color = self.shade_buttons[index].hex_color
         r, g, b = self.shade_buttons[index].rgb_values
@@ -715,6 +756,29 @@ class ColorPicker(ctk.CTk):
             self.save_config()
         except Exception as e:
             self.after(0, lambda: self.show_error(f"Failed to set shortcut: {str(e)}"))
+
+    def generate_harmonies(self):
+        """Generate color harmonies based on current color"""
+        r, g, b = self.red_var.get(), self.green_var.get(), self.blue_var.get()
+        hsv = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+        
+        harmonies = {
+            'complementary': [(hsv[0] + 0.5) % 1.0],
+            'triadic': [(hsv[0] + 1/3) % 1.0, (hsv[0] + 2/3) % 1.0],
+            'analogous': [(hsv[0] + 1/12) % 1.0, (hsv[0] - 1/12) % 1.0],
+            'split_complementary': [(hsv[0] + 0.5 + 1/12) % 1.0, (hsv[0] + 0.5 - 1/12) % 1.0]
+        }
+        
+        harmony_colors = {}
+        for name, hues in harmonies.items():
+            colors = []
+            for h in hues:
+                rgb = colorsys.hsv_to_rgb(h, hsv[1], hsv[2])
+                r, g, b = [int(x * 255) for x in rgb]
+                colors.append((r, g, b))
+            harmony_colors[name] = colors
+            
+        return harmony_colors
 
 if __name__ == "__main__":
     if check_running_instance():
